@@ -1,0 +1,51 @@
+name: Publish Skill release
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION, '.github/workflows/release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: woolpaw-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch the exact public commit
+        env:
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          git init source
+          cd source
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          git fetch --depth=1 origin "$COMMIT_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Verify archive and publish version
+        working-directory: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          archive="downloads/woolpaw-skills-v${version}.zip"
+          python3 -m zipfile -t "$archive"
+          (cd downloads && sha256sum -c SHA256SUMS.txt)
+          if gh release view "v${version}" >/dev/null 2>&1; then
+            echo "Release v${version} already exists; leaving it unchanged."
+          else
+            gh release create "v${version}" "$archive" downloads/SHA256SUMS.txt \
+              --target "$COMMIT_SHA" --title "WoolPaw Skill v${version}" \
+              --notes-file docs/RELEASE-NOTES.md
+          fi
